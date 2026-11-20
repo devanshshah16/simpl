@@ -50,24 +50,24 @@ CATEGORY_QUERIES = {
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Source+Serif+4:wght@600;700&display=swap');
 :root{--ink:#171d1a;--muted:#6d7470;--green:#087747;--pale:#e0f2e8;--line:#dfe4e0;--blue:#617895;--paper:#f7f8f7}
-html,body,[class*="css"]{font-family:'DM Sans',Arial,sans-serif;color:var(--ink)}
+html,body,[class*="css"]{font-family:'Inter',Arial,sans-serif;color:var(--ink)}
 .stApp{background:var(--paper)} header[data-testid="stHeader"]{background:rgba(247,248,247,.94)}
 .block-container{padding-top:1.35rem;padding-bottom:3rem;max-width:1500px}
 [data-testid="stSidebar"]{background:#f7f8f7;border-right:1px solid var(--line)}
 .logo{font-size:2.65rem;letter-spacing:-2px;font-weight:700;line-height:1;margin:.2rem 0 2.2rem}
 .logo span{color:var(--green)} .eyebrow{color:#707772;font-size:.77rem;letter-spacing:2px;font-weight:700;text-transform:uppercase}
 .hero-title{font-size:2.65rem;line-height:1.13;font-weight:700;letter-spacing:-1.3px;margin:0}
-.hero-sub{color:var(--muted);font-size:1.15rem;margin-top:.45rem}
-.story-card{background:white;border:1px solid #d9dfdb;border-radius:14px;overflow:hidden;box-shadow:0 10px 35px rgba(26,43,34,.055);margin:1rem 0 1.5rem}
-.story-meta{display:flex;align-items:center;gap:12px;padding:18px 26px;color:#202723;font-size:.92rem}
+.hero-sub{color:var(--muted);font-size:1.12rem;margin-top:.45rem;letter-spacing:-.15px}
+.story-card{background:white;border:1px solid #e1e7e3;border-radius:18px;overflow:hidden;box-shadow:0 14px 42px rgba(26,43,34,.065);margin:1rem 0 1.5rem}
+.story-meta{display:flex;align-items:center;gap:12px;padding:18px 26px;color:#202723;font-size:.9rem;background:linear-gradient(180deg,#fff,#fcfdfc)}
 .pill{display:inline-block;background:var(--pale);color:var(--green);padding:7px 13px;border-radius:7px;font-size:.82rem;font-weight:600}
 .story-image{width:100%;height:360px;object-fit:cover;display:block;background:#e9eeeb}
 .image-placeholder{height:240px;display:flex;align-items:center;justify-content:center;background:linear-gradient(130deg,#e7eee9,#dce7e1);color:#728078}
 .story-body{padding:25px 30px 20px}.publisher{color:var(--blue);font-size:.9rem;margin-bottom:12px}
-.story-title{font-family:'Playfair Display',Georgia,serif;font-weight:700;font-size:2.2rem;line-height:1.1;margin:0 0 15px}
-.story-summary{color:#303833;font-size:1.02rem;line-height:1.65;padding-left:1.35rem;margin:.4rem 0 1rem}.story-summary li{padding:.22rem 0}
+.story-title{font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:2.05rem;line-height:1.16;margin:0 0 15px;letter-spacing:-.3px}
+.story-summary{color:#303833;font-size:1rem;line-height:1.72;padding-left:1.35rem;margin:.55rem 0 1.15rem}.story-summary li{padding:.28rem 0 .28rem .18rem}.story-summary li::marker{color:#087747;font-weight:700}
 .section-label{color:var(--green);font-size:.78rem;letter-spacing:1.8px;font-weight:700;text-transform:uppercase;margin:18px 0 7px}
 .insight-text{color:#202723;font-size:1.02rem;line-height:1.55}
 .story-footer{border-top:1px solid var(--line);padding:16px 28px;display:flex;justify-content:space-between;color:#6d7470;font-size:.9rem}
@@ -95,6 +95,30 @@ def article_obj(title="", description="", url="", image="", source="", published
     return {"title":clean(title) or "Untitled story","description":clean(description),
             "url":url or "","image":image or "","source":clean(source) or "News publisher",
             "published":parsed_date(published),"category":"Global","country":"Global"}
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_article_text(url):
+    """Best-effort extraction from publicly accessible article pages; never bypasses paywalls."""
+    if not url:
+        return ""
+    try:
+        import trafilatura
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; SimplNews/1.0)"},
+            timeout=12,
+        )
+        response.raise_for_status()
+        extracted = trafilatura.extract(
+            response.text,
+            include_comments=False,
+            include_tables=True,
+            favor_precision=True,
+        )
+        return clean(extracted)[:12000] if extracted else ""
+    except Exception:
+        return ""
+
 
 def rss_image(entry):
     for field in ("media_content","media_thumbnail","enclosures"):
@@ -212,59 +236,94 @@ def search_news(category, country, custom_query=""):
 
 def ai_interpret(a):
     if not OPENAI_API_KEY:
-        fallback = a["description"] or "The feed did not provide enough article text for a reliable factual summary."
-        return {"facts":[fallback], "insight":"Add an OpenAI API key to enable source-grounded AI interpretation.",
-                "impact":"Potential consequences are not generated until sufficient source text is available.",
-                "confidence":"Not assessed",
-                "basis":"AI analysis is disabled because OPENAI_API_KEY is not configured."}
+        fallback = a.get("description") or "The available article text is too limited to produce a verified factual brief."
+        return {
+            "facts": [fallback],
+            "insight": "Add an OpenAI API key to enable source-grounded AI interpretation.",
+            "impact": "Potential consequences are not generated until sufficient source text is available.",
+            "confidence": "Not assessed",
+            "basis": "OPENAI_API_KEY is not configured.",
+            "error": "No API key was found. Check Streamlit Secrets and restart the app."
+        }
+
+    source_text = a.get("full_text") or a.get("description") or a.get("title", "")
+    source_level = "extracted article text" if a.get("full_text") else "publisher-provided headline and RSS excerpt"
+
     try:
         from openai import OpenAI
-        client=OpenAI(api_key=OPENAI_API_KEY)
-        prompt=f"""You are writing a concise, source-grounded news brief for Simpl.
+        client = OpenAI(api_key=OPENAI_API_KEY, timeout=45, max_retries=2)
 
-Use ONLY the article title and excerpt below. Do not use outside knowledge or imply
-you read the full article. If the supplied text is insufficient, say so clearly.
-Separate reported facts from interpretation.
+        prompt = f"""You are the news editor for Simpl. Produce a useful, detailed but concise news brief.
+
+STRICT EVIDENCE RULES:
+- Use ONLY the supplied source text. Do not use outside knowledge.
+- Do not imply you read more than the supplied text.
+- Do not invent, estimate, calculate or infer facts, dates, names, figures or numbers.
+- If the source does not state a detail, omit it.
+- Clearly separate reported facts from interpretation and possible impact.
+- If the input is only a headline or short excerpt, say that the brief is limited.
 
 Return valid JSON with exactly these keys:
-- facts: an array of 3 to 5 short, numbered-ready factual bullet points.
-  Each point should be a distinct fact stated in the supplied title/excerpt.
-  Include names, dates, quantities, percentages, prices and other numbers ONLY
-  when explicitly stated in the supplied text. Never calculate, infer or invent numbers.
-  If fewer than 3 facts are supported, return only the supported facts.
-  Each point should be concise and factual, not commentary.
-- insight: one short AI interpretation, clearly not a reported fact (max 15 words).
-- impact: one possible consequence, using conditional language (max 15 words).
-- confidence: High, Medium or Low, based on how much source detail is supplied.
-- basis: one sentence explaining what the supplied text supports.
+- facts: an array of 5 to 8 informative bullet points, where the source supports that many.
+  Aim for a fuller summary, not headline paraphrases. Capture what happened, who is involved,
+  where and when, stated figures, decisions, responses, sequence, and relevant context.
+  Each point should be one concise sentence. Do not repeat the headline.
+  If the source supports only 1-4 facts, return only those facts; never pad or speculate.
+- insight: 1-2 sentences of clearly labelled AI interpretation, max 35 words.
+- impact: 1-2 sentences on plausible consequences, conditional and explicitly framed as analysis,
+  max 30 words.
+- confidence: High, Medium, or Low, based on the amount and specificity of source text.
+- basis: explain whether the analysis used full extracted article text or only a headline/excerpt.
 
-The combined word count of all facts, insight and impact must be fewer than 100 words.
-Do not add a generic introduction or repeat the headline in the facts.
+Keep facts + insight + impact under 160 words. Return no markdown, only JSON.
 
-TITLE: {a['title']}
-PUBLISHER: {a['source']}
-AVAILABLE EXCERPT: {a['description']}
-URL: {a['url']}"""
-        out=client.chat.completions.create(model=OPENAI_MODEL,temperature=0.2,
-            response_format={"type":"json_object"},
-            messages=[{"role":"system","content":"Be precise, neutral, transparent and evidence-bound. Never invent facts or numbers."},
-                      {"role":"user","content":prompt}])
-        data=json.loads(out.choices[0].message.content)
-        facts=data.get("facts", [])
+HEADLINE: {a.get('title', '')}
+PUBLISHER: {a.get('source', '')}
+TEXT TYPE: {source_level}
+AVAILABLE SOURCE TEXT:
+{source_text[:12000]}
+ARTICLE URL: {a.get('url', '')}
+"""
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": "You are a rigorous fact-checking news editor. Never fabricate facts or figures."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        data = json.loads(response.choices[0].message.content or "{}")
+        facts = data.get("facts", [])
         if isinstance(facts, str):
-            facts=[facts]
-        facts=[clean(x) for x in facts if clean(x)]
-        data["facts"]=facts[:5]
-        for k in ("insight","impact","confidence","basis"):
-            data[k]=clean(data.get(k,""))
-        if not data["facts"]:
-            data["facts"]=[a["description"] or "The available source excerpt does not contain enough detail to list verified facts."]
+            facts = [facts]
+        facts = [clean(item) for item in facts if clean(item)]
+        data["facts"] = facts[:8] or ["The accessible source text does not contain enough detail to list verified facts."]
+        for field in ("insight", "impact", "confidence", "basis"):
+            data[field] = clean(data.get(field, ""))
+        data["error"] = ""
         return data
-    except Exception as e:
-        fallback=a["description"] or "Not enough source text is available to list verified facts."
-        return {"facts":[fallback], "insight":"AI interpretation could not be generated for this story.",
-                "impact":"Read the original reporting before drawing conclusions.",
-                "confidence":"Not assessed","basis":f"AI service error: {str(e)[:120]}"}
+
+    except Exception as exc:
+        fallback = a.get("description") or "The publisher's accessible text did not contain enough detail for a factual summary."
+        message = str(exc)
+        # Keep actionable diagnostics visible in the Behind the story panel.
+        if "401" in message or "Incorrect API key" in message or "invalid_api_key" in message:
+            hint = "OpenAI rejected the API key. Check that the key is copied correctly and belongs to an active project."
+        elif "429" in message or "insufficient_quota" in message:
+            hint = "OpenAI returned a quota/rate-limit error. Check API billing, available credits and usage limits."
+        elif "model" in message.lower() and ("not found" in message.lower() or "does not exist" in message.lower()):
+            hint = f"The configured model '{OPENAI_MODEL}' may not be available to this API project. Check OPENAI_MODEL."
+        else:
+            hint = "Check the OpenAI API key, API billing, model access and the detailed error below."
+        return {
+            "facts": [fallback],
+            "insight": "AI interpretation could not be generated for this story.",
+            "impact": "Read the original reporting before drawing conclusions.",
+            "confidence": "Not assessed",
+            "basis": f"Analysis attempted using {source_level}.",
+            "error": f"{hint} Technical detail: {message[:350]}"
+        }
 
 def ago(dt):
     sec=max(0,int((datetime.now(timezone.utc)-dt).total_seconds()))
@@ -348,8 +407,10 @@ if nav=="Discover":
         idx=st.session_state.card_index%len(feed); a=feed[idx]
         key=a["url"] or a["title"]
         if key not in st.session_state.ai_cache:
-            with st.spinner("Preparing a source-grounded perspective…"):
-                st.session_state.ai_cache[key]=ai_interpret(a)
+            with st.spinner("Reading the available reporting and preparing your brief…"):
+                enriched = dict(a)
+                enriched["full_text"] = fetch_article_text(a.get("url", ""))
+                st.session_state.ai_cache[key] = ai_interpret(enriched)
         insight=st.session_state.ai_cache[key]
         image=(f'<img class="story-image" src="{html.escape(a["image"],quote=True)}" alt="News image" />'
                if a["image"] else '<div class="image-placeholder">SIMPL. · THE BIGGER PICTURE</div>')
@@ -394,7 +455,9 @@ if nav=="Discover":
             st.write(f"**Published:** {a['published'].strftime('%d %b %Y, %H:%M UTC')}")
             st.write(f"**Original article:** {a['url']}")
             st.write(f"**AI basis:** {insight.get('basis','Only provider-returned title and excerpt were available.')}")
-            st.caption("AI interpretation is distinct from source reporting. Read the original article for full context.")
+            if insight.get("error"):
+                st.error(insight["error"])
+            st.caption("Simpl. attempts to extract publicly accessible article text. Paywalls, publisher restrictions and site layouts may limit extraction. AI interpretation is distinct from source reporting.")
 
 elif nav=="Explore":
     query=st.text_input("Search countries, companies, topics…",placeholder="Try: India, artificial intelligence, energy")
@@ -437,7 +500,17 @@ elif nav=="Profile":
     st.write("Google News RSS · Primary discovery connection (no API key)")
     st.write("NewsAPI · "+("Connected" if NEWSAPI_KEY else "Optional API key not configured"))
     st.write("The Guardian · "+("Connected" if GUARDIAN_API_KEY else "Optional API key not configured"))
-    st.write("OpenAI · "+("Connected" if OPENAI_API_KEY else "API key not configured"))
+    st.write("OpenAI · "+("API key detected" if OPENAI_API_KEY else "API key not configured"))
+    if st.button("Test OpenAI connection"):
+        if not OPENAI_API_KEY:
+            st.error("No OPENAI_API_KEY found. Add it to .streamlit/secrets.toml locally or Streamlit Cloud → Settings → Secrets.")
+        else:
+            try:
+                from openai import OpenAI
+                OpenAI(api_key=OPENAI_API_KEY, timeout=20).models.retrieve(OPENAI_MODEL)
+                st.success(f"OpenAI connection successful. Model '{OPENAI_MODEL}' is accessible.")
+            except Exception as exc:
+                st.error(f"OpenAI connection failed: {str(exc)[:500]}")
     st.caption("Coverage, rate limits, content access and redistribution rights vary. Simpl. links to publishers and does not bypass paywalls.")
 
 st.markdown("<div style='text-align:center;color:#8a928d;font-size:.8rem;margin-top:3rem'>Simpl. &nbsp; A little clarity. Every day.</div>",unsafe_allow_html=True)

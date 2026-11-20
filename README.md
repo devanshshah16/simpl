@@ -1,41 +1,28 @@
 # Simpl.
 
-A Streamlit news briefing app using Google News RSS as its primary discovery connection, with optional NewsAPI and The Guardian integrations and OpenAI-generated source-grounded analysis.
-
 ## Run locally
-
 ```bash
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Configure API credentials
-
+## Secrets
 Create `.streamlit/secrets.toml` locally:
-
 ```toml
 OPENAI_API_KEY = "your-openai-api-key"
 OPENAI_MODEL = "gpt-4o-mini"
-# Optional:
-NEWSAPI_KEY = ""
-GUARDIAN_API_KEY = ""
 ```
+Never commit `.streamlit/secrets.toml` to GitHub. The `.gitignore` excludes it.
 
-**Never commit `.streamlit/secrets.toml` or API keys to GitHub.** The `.gitignore` file excludes the real secrets file.
+For Streamlit Community Cloud, add the same TOML values in your app's Settings → Secrets.
 
-## Deploy on Streamlit Community Cloud
+## Current features
+- Google News RSS discovery, with optional NewsAPI and Guardian sources.
+- Best-effort extraction of publicly accessible article text using Trafilatura.
+- OpenAI-generated 5–8 fact bullets when the available source supports them, plus separately labelled insight and potential impact.
+- OpenAI connection test in the Profile page.
+- Inter typography and Source Serif 4 editorial headlines.
 
-1. Push `app.py`, `requirements.txt`, `.gitignore`, and optionally this README to GitHub.
-2. Create an app in Streamlit Community Cloud and select `app.py`.
-3. In the deployed app's Settings → Secrets, add the TOML credentials shown above.
-4. Deploy or reboot the app.
-
-## Notes
-
-- Google News RSS is the primary news discovery source and requires no API key.
-- OpenAI API access is billed separately from a ChatGPT subscription.
-- News feeds may provide only titles and short excerpts; the AI is instructed not to invent facts or numbers and to disclose when source text is insufficient.
-- Provider content, images, rate limits and redistribution rights vary. This app links readers to publishers and does not bypass paywalls.
-- User preferences and saved stories are currently held in Streamlit session state; persistent multi-user storage requires a database and authentication.
+Article extraction cannot bypass paywalls or publisher restrictions. If only a headline/excerpt is available, Simpl instructs the model to disclose that limitation rather than invent details.
