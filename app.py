@@ -67,7 +67,7 @@ html,body,[class*="css"]{font-family:'DM Sans',Arial,sans-serif;color:var(--ink)
 .image-placeholder{height:240px;display:flex;align-items:center;justify-content:center;background:linear-gradient(130deg,#e7eee9,#dce7e1);color:#728078}
 .story-body{padding:25px 30px 20px}.publisher{color:var(--blue);font-size:.9rem;margin-bottom:12px}
 .story-title{font-family:'Playfair Display',Georgia,serif;font-weight:700;font-size:2.2rem;line-height:1.1;margin:0 0 15px}
-.story-summary{color:#737a75;font-size:1.12rem;line-height:1.65}
+.story-summary{color:#303833;font-size:1.02rem;line-height:1.65;padding-left:1.35rem;margin:.4rem 0 1rem}.story-summary li{padding:.22rem 0}
 .section-label{color:var(--green);font-size:.78rem;letter-spacing:1.8px;font-weight:700;text-transform:uppercase;margin:18px 0 7px}
 .insight-text{color:#202723;font-size:1.02rem;line-height:1.55}
 .story-footer{border-top:1px solid var(--line);padding:16px 28px;display:flex;justify-content:space-between;color:#6d7470;font-size:.9rem}
@@ -212,33 +212,57 @@ def search_news(category, country, custom_query=""):
 
 def ai_interpret(a):
     if not OPENAI_API_KEY:
-        return {"summary":a["description"] or "The feed did not provide enough article text for a reliable factual summary.",
-                "insight":"Add an OpenAI API key to enable source-grounded AI interpretation.",
+        fallback = a["description"] or "The feed did not provide enough article text for a reliable factual summary."
+        return {"facts":[fallback], "insight":"Add an OpenAI API key to enable source-grounded AI interpretation.",
                 "impact":"Potential consequences are not generated until sufficient source text is available.",
                 "confidence":"Not assessed",
                 "basis":"AI analysis is disabled because OPENAI_API_KEY is not configured."}
     try:
         from openai import OpenAI
         client=OpenAI(api_key=OPENAI_API_KEY)
-        prompt=f"""Use ONLY the article title and excerpt below. Do not use outside knowledge or imply
-you read the full article. If insufficient, say so. Separate reported facts from interpretation.
-Return JSON keys: summary (factual, max 30 words), insight (interpretation, max 15 words),
-impact (possible consequence, max 12 words, conditional language), confidence (High/Medium/Low),
-basis (one sentence). Combined summary+insight+impact must be fewer than 60 words.
+        prompt=f"""You are writing a concise, source-grounded news brief for Simpl.
+
+Use ONLY the article title and excerpt below. Do not use outside knowledge or imply
+you read the full article. If the supplied text is insufficient, say so clearly.
+Separate reported facts from interpretation.
+
+Return valid JSON with exactly these keys:
+- facts: an array of 3 to 5 short, numbered-ready factual bullet points.
+  Each point should be a distinct fact stated in the supplied title/excerpt.
+  Include names, dates, quantities, percentages, prices and other numbers ONLY
+  when explicitly stated in the supplied text. Never calculate, infer or invent numbers.
+  If fewer than 3 facts are supported, return only the supported facts.
+  Each point should be concise and factual, not commentary.
+- insight: one short AI interpretation, clearly not a reported fact (max 15 words).
+- impact: one possible consequence, using conditional language (max 15 words).
+- confidence: High, Medium or Low, based on how much source detail is supplied.
+- basis: one sentence explaining what the supplied text supports.
+
+The combined word count of all facts, insight and impact must be fewer than 100 words.
+Do not add a generic introduction or repeat the headline in the facts.
+
 TITLE: {a['title']}
 PUBLISHER: {a['source']}
 AVAILABLE EXCERPT: {a['description']}
 URL: {a['url']}"""
         out=client.chat.completions.create(model=OPENAI_MODEL,temperature=0.2,
             response_format={"type":"json_object"},
-            messages=[{"role":"system","content":"Be precise, neutral, transparent and evidence-bound."},
+            messages=[{"role":"system","content":"Be precise, neutral, transparent and evidence-bound. Never invent facts or numbers."},
                       {"role":"user","content":prompt}])
         data=json.loads(out.choices[0].message.content)
-        for k in ("summary","insight","impact","confidence","basis"): data[k]=clean(data.get(k,""))
+        facts=data.get("facts", [])
+        if isinstance(facts, str):
+            facts=[facts]
+        facts=[clean(x) for x in facts if clean(x)]
+        data["facts"]=facts[:5]
+        for k in ("insight","impact","confidence","basis"):
+            data[k]=clean(data.get(k,""))
+        if not data["facts"]:
+            data["facts"]=[a["description"] or "The available source excerpt does not contain enough detail to list verified facts."]
         return data
     except Exception as e:
-        return {"summary":a["description"] or "Not enough source text is available to summarise this story.",
-                "insight":"AI interpretation could not be generated for this story.",
+        fallback=a["description"] or "Not enough source text is available to list verified facts."
+        return {"facts":[fallback], "insight":"AI interpretation could not be generated for this story.",
                 "impact":"Read the original reporting before drawing conclusions.",
                 "confidence":"Not assessed","basis":f"AI service error: {str(e)[:120]}"}
 
@@ -330,6 +354,10 @@ if nav=="Discover":
         image=(f'<img class="story-image" src="{html.escape(a["image"],quote=True)}" alt="News image" />'
                if a["image"] else '<div class="image-placeholder">SIMPL. · THE BIGGER PICTURE</div>')
         st.caption(f"{idx+1} of {len(feed)} stories · Source-linked perspective")
+        fact_items = "".join(
+            f"<li>{html.escape(point)}</li>"
+            for point in insight.get("facts", [])
+        )
         st.markdown(f"""
         <div class="story-card">
           <div class="story-meta"><span>◎ &nbsp;{html.escape(a['country'])}</span>
@@ -339,7 +367,8 @@ if nav=="Discover":
           <div class="story-body">
             <div class="publisher">◉ &nbsp;{html.escape(a['source'])} &nbsp;·&nbsp; Source reporting</div>
             <div class="story-title">{html.escape(a['title'])}</div>
-            <div class="story-summary">{html.escape(insight.get('summary',''))}</div><hr>
+            <div class="section-label">Key facts · source reporting</div>
+            <ol class="story-summary">{fact_items}</ol><hr>
             <div class="section-label">✧ &nbsp; AI insight · interpretation</div>
             <div class="insight-text">{html.escape(insight.get('insight',''))}</div>
             <div class="section-label">Why it matters · possible impact</div>
